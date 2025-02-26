@@ -15,9 +15,6 @@ import {
   ArrowUpDown,
   Truck,
   MapPin,
-  AlertTriangle,
-  CheckCircle2,
-  Clock,
   Package,
 } from "lucide-react";
 

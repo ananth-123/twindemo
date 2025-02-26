@@ -1,0 +1,8 @@
+{
+  "extends": "next/core-web-vitals",
+  "rules": {
+    // Add rules you want to disable here, for example:
+    "no-unused-vars": "warn", // Changes error to warning
+    "react/no-unescaped-entities": "off" // Turns off the rule completely
+  }
+}
