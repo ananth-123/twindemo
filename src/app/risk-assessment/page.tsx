@@ -321,12 +321,18 @@ export default function RiskAssessmentPage() {
                       />
                       <YAxis />
                       <Tooltip
-                        formatter={(value, name, props) => {
-                          if (name === "risk")
-                            return [value.toFixed(1) + "/10", "Risk Score"];
+                        formatter={(value, name) => {
+                          if (name === "risk") {
+                            const numValue =
+                              typeof value === "number"
+                                ? value
+                                : parseFloat(value as string);
+                            return [numValue.toFixed(1) + "/10", "Risk Score"];
+                          }
                           return [
                             value,
-                            name.charAt(0).toUpperCase() + name.slice(1),
+                            String(name).charAt(0).toUpperCase() +
+                              String(name).slice(1),
                           ];
                         }}
                       />

@@ -197,9 +197,11 @@ export default function RiskMatrixChart({ hazards }: RiskMatrixChartProps) {
         "d",
         d3
           .symbol()
-          .type((d: any) => {
-            // @ts-ignore
-            return symbolTypes[d.hazardType] || d3.symbolCircle;
+          .type((d: Hazard) => {
+            return (
+              symbolTypes[d.hazardType as keyof typeof symbolTypes] ||
+              d3.symbolCircle
+            );
           })
           .size(200)
       )
@@ -217,14 +219,12 @@ export default function RiskMatrixChart({ hazards }: RiskMatrixChartProps) {
     hazardPoints
       .selectAll(".hazard-point")
       .append("title")
-      .text(
-        (d) =>
-          `${d.description}\nLikelihood: ${d.likelihood}/10\nImpact: ${
-            d.potentialImpact
-          }/10\nRisk Score: ${((d.likelihood * d.potentialImpact) / 10).toFixed(
-            1
-          )}/10`
-      );
+      .text(function (this: HTMLTitleElement, d: unknown) {
+        const hazard = d as Hazard;
+        return `${
+          hazard.description
+        }\nLikelihood: ${hazard.likelihood}/10\nImpact: ${hazard.potentialImpact}/10\nRisk Score: ${((hazard.likelihood * hazard.potentialImpact) / 10).toFixed(1)}/10`;
+      });
 
     // Add hazard labels
     hazardPoints
@@ -295,8 +295,7 @@ export default function RiskMatrixChart({ hazards }: RiskMatrixChartProps) {
           "d",
           d3
             .symbol()
-            // @ts-ignore
-            .type(symbolTypes[type.type])
+            .type(symbolTypes[type.type as keyof typeof symbolTypes])
             .size(100)
         )
         .attr("fill", "#666");

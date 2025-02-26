@@ -153,14 +153,15 @@ export class SimulationEngine {
     scenario.affectedRegions.forEach((region) => {
       // Check suppliers in affected radius
       this.suppliers.forEach((supplier) => {
+        const [supplierLng, supplierLat] = supplier.location.coordinates;
         const distance = this.calculateDistance(
           region.lat,
           region.lng,
-          supplier.location.coordinates.lat,
-          supplier.location.coordinates.lng
+          supplierLat,
+          supplierLng
         );
         if (distance <= region.radius) {
-          affected.suppliers.add(supplier.id);
+          affected.suppliers.add(String(supplier.id));
           affected.regions.add(supplier.location.country);
         }
       });
