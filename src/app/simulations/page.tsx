@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -59,6 +59,22 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import Globe3D from "@/components/maps/Globe3D";
+import type { Supplier } from "@/types/supplier";
+import { Label } from "@/components/ui/label";
+
+interface SimulationMetrics {
+  cascadeDepth: number;
+  affectedTiers: Record<number, number>;
+  recoveryTimeline: number[];
+  riskPropagationPaths: Array<{
+    from: string;
+    to: string;
+    delay: number;
+    impact: number;
+  }>;
+  mitigationEffectiveness: Record<string, number>;
+}
 
 export default function SimulationsPage() {
   // Simulation configuration state
@@ -78,11 +94,43 @@ export default function SimulationsPage() {
     SimulationScenario["affectedRegions"]
   >([]);
   const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
+  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(
+    null
+  );
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [simulationConfig, setSimulationConfig] = useState({
+    duration: 30,
+    intensity: 0.8,
+    recoveryRate: 0.5,
+  });
 
   // Simulation results state
   const [isRunning, setIsRunning] = useState(false);
   const [results, setResults] = useState<SimulationResults | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Add metrics tracking
+  const metricsRef = useRef<SimulationMetrics>({
+    cascadeDepth: 0,
+    affectedTiers: {},
+    recoveryTimeline: [],
+    riskPropagationPaths: [],
+    mitigationEffectiveness: {},
+  });
+
+  // Enhanced logging function
+  const logSimulationMetrics = (phase: string, data: any) => {
+    console.log(`[Simulation ${phase}]`, {
+      timestamp: new Date().toISOString(),
+      config: simulationConfig,
+      metrics: {
+        ...data,
+        affectedSuppliers: data.affectedSuppliers?.length || 0,
+        cascadeDepth: metricsRef.current.cascadeDepth,
+        tierImpact: metricsRef.current.affectedTiers,
+      },
+    });
+  };
 
   // Initialize simulation engine
   const engine = new SimulationEngine(
@@ -90,6 +138,20 @@ export default function SimulationsPage() {
     transportRoutes,
     climateEvents
   );
+
+  // Load suppliers on mount
+  useEffect(() => {
+    const loadSuppliers = async () => {
+      try {
+        const response = await fetch("/api/suppliers");
+        const data = await response.json();
+        setSuppliers(data);
+      } catch (error) {
+        console.error("Failed to load suppliers:", error);
+      }
+    };
+    loadSuppliers();
+  }, []);
 
   // Run simulation
   const runSimulation = async () => {
@@ -119,15 +181,19 @@ export default function SimulationsPage() {
   };
 
   // Handle map selection
-  const handleMapClick = (lat: number, lng: number) => {
-    setSelectedRegions([
-      ...selectedRegions,
+  const handleRegionClick = (lat: number, lng: number) => {
+    setSelectedRegions((prev) => [
+      ...prev,
       {
         lat,
         lng,
-        radius: 300, // Default radius in km
+        radius: simulationConfig.intensity * 5, // Scale radius based on intensity
       },
     ]);
+  };
+
+  const handleClearRegions = () => {
+    setSelectedRegions([]);
   };
 
   // Handle supplier selection
@@ -138,6 +204,25 @@ export default function SimulationsPage() {
       setSelectedSuppliers([...selectedSuppliers, supplierId]);
     }
   };
+
+  // Add logging to track simulation state
+  useEffect(() => {
+    console.log("[Simulation] State Update:", {
+      timestamp: new Date().toISOString(),
+      selectedRegions,
+      selectedSuppliers,
+      simulationConfig: {
+        duration: disruptionDuration[0],
+        intensity: disruptionSeverity[0],
+        recoveryRate: 0, // Assuming recoveryRate is not available in the current state
+      },
+    });
+  }, [
+    selectedRegions,
+    selectedSuppliers,
+    disruptionDuration,
+    disruptionSeverity,
+  ]);
 
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
@@ -174,9 +259,9 @@ export default function SimulationsPage() {
         </TabsList>
 
         <TabsContent value="configure" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-3">
-            {/* Scenario Configuration */}
-            <Card className="md:col-span-1">
+          <div className="grid gap-4 grid-cols-1 md:grid-cols-6 lg:grid-cols-8">
+            {/* Configuration Panel */}
+            <Card className="md:col-span-2">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <FlaskConical className="h-5 w-5" />
@@ -370,30 +455,17 @@ export default function SimulationsPage() {
               </CardContent>
             </Card>
 
-            {/* Affected Areas */}
-            <Card className="md:col-span-2">
-              <CardHeader>
-                <CardTitle>Affected Areas</CardTitle>
-                <CardDescription>
-                  Click on the map to select affected regions and suppliers
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="h-[500px] rounded-lg overflow-hidden border">
-                  <WorldMap
-                    suppliers={suppliers}
-                    routes={transportRoutes}
-                    climateEvents={climateEvents}
-                    selectedMaterial="all"
-                    selectedTiers={{ tier1: true, tier2: true, tier3: true }}
-                    selectedModes={selectedTransportModes}
-                    riskThreshold={0}
-                    onMapClick={handleMapClick}
-                    onSupplierClick={handleSupplierSelect}
-                    selectedRegions={selectedRegions}
-                    selectedSuppliers={selectedSuppliers}
-                  />
-                </div>
+            {/* Globe Visualization */}
+            <Card className="md:col-span-4 lg:col-span-6 h-[600px]">
+              <CardContent className="p-0 h-full">
+                <Globe3D
+                  suppliers={suppliers}
+                  selectedSupplier={selectedSupplier}
+                  onSupplierSelect={setSelectedSupplier}
+                  isSimulation={true}
+                  selectedRegions={selectedRegions}
+                  onRegionClick={handleRegionClick}
+                />
               </CardContent>
             </Card>
           </div>

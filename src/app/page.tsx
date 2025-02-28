@@ -41,7 +41,7 @@ export default function Home() {
                   <Link href="/dashboard">View Dashboard</Link>
                 </Button>
                 <Button asChild variant="outline" size="lg">
-                  <Link href="/map">Explore Map</Link>
+                  <Link href="/globe">Explore 3D Globe</Link>
                 </Button>
               </div>
             </div>

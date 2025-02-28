@@ -15,9 +15,10 @@ const routes = [
     icon: BarChart3,
   },
   {
-    name: "Map",
-    path: "/map",
+    name: "3D Globe",
+    path: "/globe",
     icon: Globe,
+    description: "Interactive 3D visualization of global supplier network",
   },
   {
     name: "Suppliers",
