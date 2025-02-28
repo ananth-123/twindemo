@@ -4,31 +4,49 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { BarChart3, Globe, Truck, FlaskConical, Menu, X } from "lucide-react";
+import {
+  BarChart3,
+  Globe2,
+  Truck,
+  FlaskConical,
+  Menu,
+  X,
+  Building2,
+  Train,
+} from "lucide-react";
 import { useState } from "react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 const routes = [
   {
-    name: "Dashboard",
+    name: "Overview",
     path: "/dashboard",
     icon: BarChart3,
+    description: "Portfolio performance and key metrics",
   },
   {
-    name: "3D Globe",
+    name: "Projects",
+    path: "/projects",
+    icon: Building2,
+    description: "Major infrastructure projects and timelines",
+  },
+  {
+    name: "Network",
     path: "/globe",
-    icon: Globe,
-    description: "Interactive 3D visualization of global supplier network",
+    icon: Globe2,
+    description: "Supply chain network visualization",
   },
   {
     name: "Suppliers",
     path: "/suppliers",
     icon: Truck,
+    description: "Supplier risk and material tracking",
   },
   {
     name: "Simulations",
     path: "/simulations",
     icon: FlaskConical,
+    description: "Supply chain disruption scenarios",
   },
 ];
 
@@ -41,10 +59,14 @@ export function Navigation() {
       <div className="flex h-16 items-center px-4 container mx-auto">
         <div className="flex items-center mr-4 font-semibold">
           <Link href="/" className="flex items-center gap-2">
-            <span className="hidden md:inline-block">
-              Supply Chain Resilience
-            </span>
-            <span className="md:hidden">SCR</span>
+            <div className="flex items-center gap-1">
+              <Train className="h-5 w-5 text-primary" />
+              <span className="hidden md:inline-block">NEXUS</span>
+              {/* <span className="text-xs text-muted-foreground hidden md:inline-block">
+                DfT Infrastructure Intelligence
+              </span> */}
+              <span className="md:hidden">NEXUS</span>
+            </div>
           </Link>
         </div>
 
@@ -82,7 +104,16 @@ export function Navigation() {
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="w-[240px] sm:w-[300px]">
-            <nav className="flex flex-col gap-4 mt-8">
+            <div className="flex items-center gap-2 mb-8">
+              <Train className="h-5 w-5 text-primary" />
+              <div className="flex flex-col">
+                <span className="font-semibold">NEXUS</span>
+                {/* <span className="text-xs text-muted-foreground">
+                  DfT Infrastructure Intelligence
+                </span> */}
+              </div>
+            </div>
+            <nav className="flex flex-col gap-4">
               {routes.map((route) => {
                 const Icon = route.icon;
                 return (
@@ -100,7 +131,12 @@ export function Navigation() {
                   >
                     <Link href={route.path} className="flex items-center gap-2">
                       <Icon className="h-4 w-4" />
-                      {route.name}
+                      <div className="flex flex-col items-start">
+                        <span>{route.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {route.description}
+                        </span>
+                      </div>
                     </Link>
                   </Button>
                 );

@@ -1,207 +1,357 @@
+"use client";
+
+import { useState } from "react";
+import { suppliers } from "@/lib/data/suppliers/suppliers";
+import { Supplier } from "@/types/supplier";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  AlertTriangle,
+  ArrowDownUp,
+  Filter,
+  Search,
+  X,
+  Building2,
+  ShieldAlert,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Search,
-  Filter,
-  ArrowUpDown,
-  Truck,
-  MapPin,
-  Package,
-} from "lucide-react";
+import dynamic from "next/dynamic";
+import { CCRAAssessmentView } from "@/components/analysis/CCRAAssessment";
+import { evaluateSupplierCCRA } from "@/lib/analysis/ccra";
+
+const Globe3D = dynamic(() => import("@/components/maps/Globe3D"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-[500px] bg-gray-900 flex items-center justify-center">
+      <div className="text-gray-400">Loading globe visualization...</div>
+    </div>
+  ),
+});
 
 export default function SuppliersPage() {
+  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(
+    null
+  );
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [tierFilter, setTierFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("name");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+
+  // Filter suppliers based on search query, status, and tier
+  const filteredSuppliers = suppliers.filter((supplier) => {
+    const matchesSearch = supplier.name
+      .toLowerCase()
+      .includes(searchQuery.toLowerCase());
+    const matchesStatus =
+      statusFilter === "all" || supplier.status === statusFilter;
+    const matchesTier =
+      tierFilter === "all" || supplier.tier === parseInt(tierFilter);
+    return matchesSearch && matchesStatus && matchesTier;
+  });
+
+  // Sort suppliers based on selected criteria
+  const sortedSuppliers = [...filteredSuppliers].sort((a, b) => {
+    let comparison = 0;
+    switch (sortBy) {
+      case "name":
+        comparison = a.name.localeCompare(b.name);
+        break;
+      case "risk":
+        comparison = b.risk - a.risk;
+        break;
+      case "tier":
+        comparison = a.tier - b.tier;
+        break;
+      case "status":
+        comparison = a.status.localeCompare(b.status);
+        break;
+    }
+    return sortOrder === "asc" ? comparison : -comparison;
+  });
+
+  // Calculate summary metrics
+  const criticalSuppliers = suppliers.filter(
+    (s) => s.status === "Critical"
+  ).length;
+  const atRiskSuppliers = suppliers.filter(
+    (s) => s.status === "At Risk"
+  ).length;
+  const tier1Count = suppliers.filter((s) => s.tier === 1).length;
+  const highRiskCount = suppliers.filter((s) => s.risk > 70).length;
+
   return (
-    <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-3xl font-bold tracking-tight">Suppliers</h2>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <Filter className="mr-2 h-4 w-4" />
-            Filter
-          </Button>
-          <Button variant="outline" size="sm">
-            <ArrowUpDown className="mr-2 h-4 w-4" />
-            Sort
-          </Button>
+    <div className="container mx-auto py-6 space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">
+            Supplier Network
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Monitor and analyze supplier relationships and risks
+          </p>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder="Search suppliers..."
-            className="pl-8"
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Total Suppliers</p>
+                <h3 className="text-2xl font-bold">{suppliers.length}</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {tier1Count} tier 1 suppliers
+                </p>
+              </div>
+              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                <Building2 className="h-4 w-4 text-primary" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Critical Status</p>
+                <h3 className="text-2xl font-bold">{criticalSuppliers}</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {Math.round((criticalSuppliers / suppliers.length) * 100)}% of
+                  suppliers
+                </p>
+              </div>
+              <div className="h-8 w-8 rounded-full bg-destructive/10 flex items-center justify-center">
+                <AlertTriangle className="h-4 w-4 text-destructive" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">At Risk</p>
+                <h3 className="text-2xl font-bold">{atRiskSuppliers}</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {Math.round((atRiskSuppliers / suppliers.length) * 100)}% of
+                  suppliers
+                </p>
+              </div>
+              <div className="h-8 w-8 rounded-full bg-yellow-500/10 flex items-center justify-center">
+                <ShieldAlert className="h-4 w-4 text-yellow-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">High Risk Score</p>
+                <h3 className="text-2xl font-bold">{highRiskCount}</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Risk score &gt; 70%
+                </p>
+              </div>
+              <div className="h-8 w-8 rounded-full bg-orange-500/10 flex items-center justify-center">
+                <AlertTriangle className="h-4 w-4 text-orange-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Globe View */}
+      <Card>
+        <CardContent className="p-0 h-[500px]">
+          <Globe3D
+            suppliers={suppliers}
+            selectedSupplier={selectedSupplier}
+            onSupplierSelect={setSelectedSupplier}
           />
+        </CardContent>
+      </Card>
+
+      <Tabs defaultValue="grid" className="space-y-4">
+        <div className="flex justify-between items-center">
+          <TabsList>
+            <TabsTrigger value="grid">Grid View</TabsTrigger>
+            <TabsTrigger value="table">Table View</TabsTrigger>
+          </TabsList>
+
+          {/* Filters */}
+          <div className="flex gap-4">
+            <div className="relative w-[200px]">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search suppliers..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+
+            <Select value={tierFilter} onValueChange={setTierFilter}>
+              <SelectTrigger className="w-[180px]">
+                <Filter className="h-4 w-4 mr-2" />
+                <SelectValue placeholder="Filter by tier" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Tiers</SelectItem>
+                <SelectItem value="1">Tier 1</SelectItem>
+                <SelectItem value="2">Tier 2</SelectItem>
+                <SelectItem value="3">Tier 3</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[180px]">
+                <Filter className="h-4 w-4 mr-2" />
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="Critical">Critical</SelectItem>
+                <SelectItem value="At Risk">At Risk</SelectItem>
+                <SelectItem value="On Track">On Track</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger className="w-[180px]">
+                <ArrowDownUp className="h-4 w-4 mr-2" />
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name">Supplier Name</SelectItem>
+                <SelectItem value="risk">Risk Score</SelectItem>
+                <SelectItem value="tier">Tier Level</SelectItem>
+                <SelectItem value="status">Status</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+            >
+              <ArrowDownUp
+                className={`h-4 w-4 transition-transform ${
+                  sortOrder === "desc" ? "rotate-180" : ""
+                }`}
+              />
+            </Button>
+          </div>
         </div>
-        <Button>Add Supplier</Button>
-      </div>
 
-      <Tabs defaultValue="all" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="all">All Suppliers</TabsTrigger>
-          <TabsTrigger value="high-risk">High Risk</TabsTrigger>
-          <TabsTrigger value="tier1">Tier 1</TabsTrigger>
-          <TabsTrigger value="tier2">Tier 2</TabsTrigger>
-          <TabsTrigger value="tier3">Tier 3</TabsTrigger>
-        </TabsList>
+        {/* Active Filters */}
+        {(searchQuery || statusFilter !== "all" || tierFilter !== "all") && (
+          <div className="flex gap-2">
+            {searchQuery && (
+              <Badge variant="secondary" className="flex items-center gap-1">
+                Search: {searchQuery}
+                <X
+                  className="h-3 w-3 ml-1 cursor-pointer"
+                  onClick={() => setSearchQuery("")}
+                />
+              </Badge>
+            )}
+            {statusFilter !== "all" && (
+              <Badge variant="secondary" className="flex items-center gap-1">
+                Status: {statusFilter}
+                <X
+                  className="h-3 w-3 ml-1 cursor-pointer"
+                  onClick={() => setStatusFilter("all")}
+                />
+              </Badge>
+            )}
+            {tierFilter !== "all" && (
+              <Badge variant="secondary" className="flex items-center gap-1">
+                Tier: {tierFilter}
+                <X
+                  className="h-3 w-3 ml-1 cursor-pointer"
+                  onClick={() => setTierFilter("all")}
+                />
+              </Badge>
+            )}
+          </div>
+        )}
 
-        <TabsContent value="all" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {[
-              {
-                id: 1,
-                name: "Acme Electronics",
-                tier: 1,
-                location: "Taiwan",
-                materials: ["Electronics", "Semiconductors"],
-                risk: 87,
-                status: "Critical",
-              },
-              {
-                id: 2,
-                name: "Global Materials Ltd",
-                tier: 1,
-                location: "Germany",
-                materials: ["Steel", "Aluminum"],
-                risk: 82,
-                status: "Critical",
-              },
-              {
-                id: 3,
-                name: "Pacific Logistics",
-                tier: 2,
-                location: "Singapore",
-                materials: ["Transport Services"],
-                risk: 78,
-                status: "At Risk",
-              },
-              {
-                id: 4,
-                name: "Eastern Components",
-                tier: 2,
-                location: "China",
-                materials: ["Electronics", "Plastics"],
-                risk: 76,
-                status: "At Risk",
-              },
-              {
-                id: 5,
-                name: "Metro Shipping",
-                tier: 3,
-                location: "Netherlands",
-                materials: ["Transport Services"],
-                risk: 72,
-                status: "At Risk",
-              },
-              {
-                id: 6,
-                name: "UK Steel Works",
-                tier: 1,
-                location: "United Kingdom",
-                materials: ["Steel", "Metal Components"],
-                risk: 45,
-                status: "On Track",
-              },
-              {
-                id: 7,
-                name: "Northern Aggregates",
-                tier: 2,
-                location: "Sweden",
-                materials: ["Concrete", "Aggregates"],
-                risk: 38,
-                status: "On Track",
-              },
-              {
-                id: 8,
-                name: "Timber Solutions",
-                tier: 3,
-                location: "Canada",
-                materials: ["Timber", "Wood Products"],
-                risk: 25,
-                status: "On Track",
-              },
-              {
-                id: 9,
-                name: "Chemical Industries",
-                tier: 2,
-                location: "France",
-                materials: ["Chemicals", "Adhesives"],
-                risk: 52,
-                status: "At Risk",
-              },
-            ].map((supplier) => (
-              <Card key={supplier.id} className="overflow-hidden">
-                <CardHeader className="pb-2">
-                  <div className="flex justify-between items-start">
-                    <CardTitle className="text-lg">{supplier.name}</CardTitle>
-                    <Badge
-                      variant={
-                        supplier.status === "Critical"
-                          ? "destructive"
-                          : supplier.status === "At Risk"
-                          ? "default"
-                          : "outline"
-                      }
-                    >
-                      {supplier.status}
-                    </Badge>
-                  </div>
-                  <CardDescription className="flex items-center gap-1">
-                    <MapPin className="h-3 w-3" /> {supplier.location}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <Truck className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm">Tier {supplier.tier}</span>
-                      </div>
-                      <div
-                        className={`flex h-9 w-9 items-center justify-center rounded-full ${
-                          supplier.risk > 80
-                            ? "bg-red-100 text-red-800"
-                            : supplier.risk > 50
-                            ? "bg-amber-100 text-amber-800"
-                            : "bg-green-100 text-green-800"
-                        }`}
-                      >
-                        <span className="text-xs font-medium">
-                          {supplier.risk}
-                        </span>
-                      </div>
-                    </div>
+        <TabsContent value="grid" className="mt-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {sortedSuppliers.map((supplier) => (
+              <Card
+                key={supplier.id}
+                className="cursor-pointer hover:bg-muted/50 transition-colors"
+                onClick={() => setSelectedSupplier(supplier)}
+              >
+                <CardContent className="p-6">
+                  <div className="flex items-start justify-between">
                     <div>
-                      <p className="text-xs text-muted-foreground mb-1">
-                        Materials:
+                      <h3 className="font-semibold">{supplier.name}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        {supplier.location.country}
                       </p>
-                      <div className="flex flex-wrap gap-1">
-                        {supplier.materials.map((material) => (
-                          <Badge
-                            key={material}
-                            variant="secondary"
-                            className="text-xs"
-                          >
-                            <Package className="mr-1 h-3 w-3" />
-                            {material}
-                          </Badge>
-                        ))}
-                      </div>
                     </div>
-                    <Button variant="outline" size="sm" className="w-full mt-2">
-                      View Details
-                    </Button>
+                    <Badge variant="outline">Tier {supplier.tier}</Badge>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">
+                        Risk Score
+                      </span>
+                      <Badge
+                        variant={
+                          supplier.risk > 70
+                            ? "destructive"
+                            : supplier.risk > 40
+                            ? "warning"
+                            : "outline"
+                        }
+                      >
+                        {supplier.risk}%
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">
+                        Status
+                      </span>
+                      <Badge
+                        variant={
+                          supplier.status === "Critical"
+                            ? "destructive"
+                            : supplier.status === "At Risk"
+                            ? "warning"
+                            : "outline"
+                        }
+                      >
+                        {supplier.status}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">
+                        Materials
+                      </span>
+                      <span className="text-sm">
+                        {supplier.materials.length} types
+                      </span>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -209,78 +359,194 @@ export default function SuppliersPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="high-risk" className="space-y-4">
+        <TabsContent value="table" className="mt-6">
           <Card>
-            <CardHeader>
-              <CardTitle>High Risk Suppliers</CardTitle>
-              <CardDescription>
-                Suppliers with risk score above 70%
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[400px] flex items-center justify-center border-2 border-dashed border-muted-foreground/25 rounded-lg">
-                <p className="text-muted-foreground">
-                  High risk suppliers will be displayed here
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="tier1" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Tier 1 Suppliers</CardTitle>
-              <CardDescription>
-                Direct suppliers to Department for Transport projects
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[400px] flex items-center justify-center border-2 border-dashed border-muted-foreground/25 rounded-lg">
-                <p className="text-muted-foreground">
-                  Tier 1 suppliers will be displayed here
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="tier2" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Tier 2 Suppliers</CardTitle>
-              <CardDescription>
-                Secondary suppliers to Department for Transport projects
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[400px] flex items-center justify-center border-2 border-dashed border-muted-foreground/25 rounded-lg">
-                <p className="text-muted-foreground">
-                  Tier 2 suppliers will be displayed here
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="tier3" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Tier 3 Suppliers</CardTitle>
-              <CardDescription>
-                Tertiary suppliers to Department for Transport projects
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[400px] flex items-center justify-center border-2 border-dashed border-muted-foreground/25 rounded-lg">
-                <p className="text-muted-foreground">
-                  Tier 3 suppliers will be displayed here
-                </p>
-              </div>
+            <CardContent className="p-0">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left p-4">Supplier</th>
+                    <th className="text-left p-4">Tier</th>
+                    <th className="text-left p-4">Location</th>
+                    <th className="text-left p-4">Status</th>
+                    <th className="text-left p-4">Risk Score</th>
+                    <th className="text-left p-4">Materials</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedSuppliers.map((supplier) => (
+                    <tr
+                      key={supplier.id}
+                      className="border-b hover:bg-muted/50 cursor-pointer"
+                      onClick={() => setSelectedSupplier(supplier)}
+                    >
+                      <td className="p-4">
+                        <div>
+                          <p className="font-medium">{supplier.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {supplier.location.country}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <Badge variant="outline">Tier {supplier.tier}</Badge>
+                      </td>
+                      <td className="p-4">{supplier.location.country}</td>
+                      <td className="p-4">
+                        <Badge
+                          variant={
+                            supplier.status === "Critical"
+                              ? "destructive"
+                              : supplier.status === "At Risk"
+                              ? "warning"
+                              : "outline"
+                          }
+                        >
+                          {supplier.status}
+                        </Badge>
+                      </td>
+                      <td className="p-4">
+                        <Badge
+                          variant={
+                            supplier.risk > 70
+                              ? "destructive"
+                              : supplier.risk > 40
+                              ? "warning"
+                              : "outline"
+                          }
+                        >
+                          {supplier.risk}%
+                        </Badge>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex flex-wrap gap-1">
+                          {supplier.materials.map((material) => (
+                            <Badge
+                              key={material}
+                              variant="secondary"
+                              className="text-xs"
+                            >
+                              {material}
+                            </Badge>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Supplier Details Dialog */}
+      <Dialog
+        open={!!selectedSupplier}
+        onOpenChange={() => setSelectedSupplier(null)}
+      >
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          {selectedSupplier && (
+            <div className="space-y-6">
+              <DialogTitle className="text-2xl font-bold">
+                {selectedSupplier.name}
+              </DialogTitle>
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-muted-foreground">
+                    {selectedSupplier.location.country}
+                  </p>
+                </div>
+                <Badge variant="outline">Tier {selectedSupplier.tier}</Badge>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">
+                        Risk Score
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle
+                          className={`h-4 w-4 ${
+                            selectedSupplier.risk > 70
+                              ? "text-destructive"
+                              : selectedSupplier.risk > 40
+                              ? "text-yellow-500"
+                              : "text-green-500"
+                          }`}
+                        />
+                        <span className="text-2xl font-bold">
+                          {selectedSupplier.risk}%
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">Status</p>
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          variant={
+                            selectedSupplier.status === "Critical"
+                              ? "destructive"
+                              : selectedSupplier.status === "At Risk"
+                              ? "warning"
+                              : "outline"
+                          }
+                        >
+                          {selectedSupplier.status}
+                        </Badge>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">Materials</p>
+                      <div className="flex flex-wrap gap-1">
+                        {selectedSupplier.materials.map((material) => (
+                          <Badge
+                            key={material}
+                            variant="secondary"
+                            className="text-xs"
+                          >
+                            {material}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Add CCRA Assessment */}
+              <Tabs defaultValue="overview">
+                <TabsList>
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="climate">
+                    Climate Risk Assessment
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="overview">
+                  {/* Existing supplier details content */}
+                </TabsContent>
+                <TabsContent value="climate">
+                  <CCRAAssessmentView
+                    assessment={evaluateSupplierCCRA(selectedSupplier)}
+                  />
+                </TabsContent>
+              </Tabs>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

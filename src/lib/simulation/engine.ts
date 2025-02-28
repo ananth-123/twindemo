@@ -1,35 +1,51 @@
 import { ClimateEvent } from "../data/climate/events";
-import { Supplier } from "../data/suppliers/suppliers";
+import { Supplier } from "@/types/supplier";
 import { TransportRoute } from "../data/suppliers/routes";
 
 export interface SimulationScenario {
   id: string;
   name: string;
-  disruptionType:
-    | "weather"
-    | "geopolitical"
-    | "supplier"
-    | "transport"
-    | "labor"
-    | "cyber";
+  disruptionType: "weather" | "geopolitical" | "infrastructure" | "cyber";
   severity: number;
   duration: number;
   timeframe: number;
+  recoveryRate: number;
   affectedTransportModes: {
     sea: boolean;
     air: boolean;
     rail: boolean;
     road: boolean;
   };
-  affectedRegions: {
+  affectedRegions: Array<{
     lat: number;
     lng: number;
     radius: number;
-  }[];
+    impactZone: {
+      suppliers: string[];
+      severity: number;
+      estimatedRecovery: number;
+    };
+  }>;
   affectedSuppliers: string[];
 }
 
 export interface SimulationResults {
+  id: string;
+  timestamp: string;
+  affectedSuppliers: Array<{
+    supplier: Supplier;
+    impact: number;
+    recoveryTime: number;
+  }>;
+  cascadeDepth: number;
+  totalImpact: number;
+  mitigationStrategies: Array<{
+    action: string;
+    impact: "high" | "medium" | "low";
+    difficulty: "high" | "medium" | "low";
+    timeframe: string;
+    description: string;
+  }>;
   supplyChainHealth: {
     baseline: number;
     simulated: number;
@@ -40,29 +56,22 @@ export interface SimulationResults {
   };
   projectDelays: {
     average: number;
-    affected: {
+    affected: Array<{
       projectId: string;
       name: string;
       delay: number;
-    }[];
+    }>;
   };
   costImpact: {
     percentage: number;
     value: number;
   };
-  cascadeEffects: {
+  cascadeEffects: Array<{
     day: number;
     event: string;
     impact: number;
     type: "supplier" | "transport" | "project" | "cost";
-  }[];
-  mitigationStrategies: {
-    action: string;
-    impact: "high" | "medium" | "low";
-    difficulty: "high" | "medium" | "low";
-    timeframe: string;
-    description: string;
-  }[];
+  }>;
 }
 
 export class SimulationEngine {
@@ -83,44 +92,71 @@ export class SimulationEngine {
   public async runSimulation(
     scenario: SimulationScenario
   ): Promise<SimulationResults> {
-    // Calculate baseline metrics
-    const baseline = this.calculateBaselineMetrics();
+    try {
+      // Identify affected components
+      const affected = this.identifyAffectedComponents(scenario);
 
-    // Identify directly affected components
-    const affectedComponents = this.identifyAffectedComponents(scenario);
+      // Calculate cascade effects
+      const cascadeEffects = this.calculateCascadeEffects(scenario, affected);
 
-    // Calculate cascade effects
-    const cascadeEffects = this.calculateCascadeEffects(
-      scenario,
-      affectedComponents
-    );
+      // Calculate impact metrics
+      const impact = this.calculateImpact(scenario, cascadeEffects);
 
-    // Calculate final impact
-    const impact = this.calculateImpact(scenario, cascadeEffects);
+      // Generate mitigation strategies using OpenAI API
+      const mitigationStrategies = await this.generateMitigationStrategies(
+        scenario,
+        affected,
+        impact
+      );
 
-    // Generate mitigation strategies
-    const mitigationStrategies = this.generateMitigationStrategies(impact);
+      // Calculate final metrics
+      const baseline = this.calculateBaselineMetrics();
+      const maxImpact = Math.max(...cascadeEffects.map((e) => e.impact));
 
-    return {
-      supplyChainHealth: {
-        baseline: baseline.health,
-        simulated: impact.health,
-      },
-      materialAvailability: {
-        baseline: baseline.availability,
-        simulated: impact.availability,
-      },
-      projectDelays: {
-        average: impact.averageDelay,
-        affected: impact.affectedProjects,
-      },
-      costImpact: {
-        percentage: impact.costIncrease,
-        value: impact.costValue,
-      },
-      cascadeEffects: cascadeEffects,
-      mitigationStrategies: mitigationStrategies,
-    };
+      // Return simulation results
+      return {
+        id: scenario.id,
+        timestamp: new Date().toISOString(),
+        affectedSuppliers: Array.from(affected.suppliers)
+          .map((supplierId) => {
+            const supplier = this.suppliers.find(
+              (s) => s.id.toString() === supplierId
+            );
+            if (!supplier) return null;
+            return {
+              supplier,
+              impact: Math.min(100, supplier.risk + scenario.severity * 0.5),
+              recoveryTime: Math.floor(
+                scenario.duration * (1 - scenario.recoveryRate)
+              ),
+            };
+          })
+          .filter((s): s is NonNullable<typeof s> => s !== null),
+        cascadeDepth: Math.ceil(maxImpact / 20),
+        totalImpact: maxImpact,
+        mitigationStrategies,
+        supplyChainHealth: {
+          baseline: baseline.health,
+          simulated: impact.health,
+        },
+        materialAvailability: {
+          baseline: baseline.availability,
+          simulated: impact.availability,
+        },
+        projectDelays: {
+          average: impact.averageDelay,
+          affected: impact.affectedProjects,
+        },
+        costImpact: {
+          percentage: impact.costIncrease,
+          value: impact.costValue,
+        },
+        cascadeEffects,
+      };
+    } catch (error) {
+      console.error("Simulation error:", error);
+      throw error;
+    }
   }
 
   private calculateBaselineMetrics() {
@@ -171,17 +207,19 @@ export class SimulationEngine {
         const startDistance = this.calculateDistance(
           region.lat,
           region.lng,
-          route.from.coordinates.lat,
-          route.from.coordinates.lng
+          route.from.coordinates[1],
+          route.from.coordinates[0]
         );
+
         const endDistance = this.calculateDistance(
           region.lat,
           region.lng,
-          route.to.coordinates.lat,
-          route.to.coordinates.lng
+          route.to.coordinates[1],
+          route.to.coordinates[0]
         );
+
         if (startDistance <= region.radius || endDistance <= region.radius) {
-          affected.routes.add(route.id);
+          affected.routes.add(String(route.id));
         }
       });
     });
@@ -230,7 +268,9 @@ export class SimulationEngine {
     // First-order effects (directly affected suppliers and routes)
     currentDay += Math.floor(scenario.duration * 0.2);
     affected.suppliers.forEach((supplierId) => {
-      const supplier = this.suppliers.find((s) => s.id === supplierId);
+      const supplier = this.suppliers.find(
+        (s) => s.id.toString() === supplierId
+      );
       if (supplier) {
         cascadeEffects.push({
           day: currentDay,
@@ -244,7 +284,7 @@ export class SimulationEngine {
     // Transport disruptions
     currentDay += Math.floor(scenario.duration * 0.1);
     affected.routes.forEach((routeId) => {
-      const route = this.routes.find((r) => r.id === routeId);
+      const route = this.routes.find((r) => r.id.toString() === routeId);
       if (route) {
         cascadeEffects.push({
           day: currentDay,
@@ -339,12 +379,49 @@ export class SimulationEngine {
     };
   }
 
-  private generateMitigationStrategies(
+  private async generateMitigationStrategies(
+    scenario: SimulationScenario,
+    affected: ReturnType<typeof this.identifyAffectedComponents>,
+    impact: ReturnType<typeof this.calculateImpact>
+  ) {
+    try {
+      // Call the API route for strategy generation
+      const response = await fetch("/api/generate-strategies", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          regions: scenario.affectedRegions,
+          affectedSuppliers: Array.from(affected.suppliers),
+          simulationConfig: {
+            duration: scenario.duration,
+            intensity: scenario.severity / 100,
+            recoveryRate: scenario.recoveryRate,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to generate strategies");
+      }
+
+      const { strategies } = await response.json();
+      return strategies;
+    } catch (error) {
+      console.error("Strategy generation error:", error);
+      // Fallback to basic strategies if API call fails
+      return this.generateBasicStrategies(impact);
+    }
+  }
+
+  private generateBasicStrategies(
     impact: ReturnType<typeof this.calculateImpact>
   ) {
     const strategies: SimulationResults["mitigationStrategies"] = [];
 
-    // Add strategies based on impact severity
+    // Add basic strategies based on impact severity
     if (impact.health < 50) {
       strategies.push({
         action: "Diversify Supplier Base",
@@ -352,7 +429,7 @@ export class SimulationEngine {
         difficulty: "high",
         timeframe: "3-6 months",
         description:
-          "Establish relationships with additional suppliers in different geographical regions to reduce dependency on affected suppliers.",
+          "Establish relationships with additional suppliers in different geographical regions.",
       });
     }
 
@@ -363,7 +440,7 @@ export class SimulationEngine {
         difficulty: "low",
         timeframe: "1-2 months",
         description:
-          "Increase inventory levels of critical materials to provide a buffer against supply chain disruptions.",
+          "Increase inventory levels of critical materials to provide a buffer.",
       });
     }
 
@@ -374,18 +451,7 @@ export class SimulationEngine {
         difficulty: "high",
         timeframe: "2-4 months",
         description:
-          "Develop contingency transport routes that bypass affected areas, including alternative ports and logistics providers.",
-      });
-    }
-
-    if (impact.costIncrease > 15) {
-      strategies.push({
-        action: "Revise Project Timelines",
-        impact: "medium",
-        difficulty: "medium",
-        timeframe: "1-2 months",
-        description:
-          "Adjust project schedules to prioritize critical path activities and reallocate resources to minimize overall delays.",
+          "Develop contingency transport routes and logistics providers.",
       });
     }
 

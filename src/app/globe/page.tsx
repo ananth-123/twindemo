@@ -1,35 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { suppliers } from "@/lib/data/suppliers/suppliers";
 import Globe3D from "@/components/maps/Globe3D";
 import SupplierStats from "@/components/suppliers/SupplierStats";
 import { motion, AnimatePresence } from "framer-motion";
-
-// Add diagnostic logging
-const logRouteTransition = () => {
-  console.log("[Globe] Route transition:", {
-    currentPath: window.location.pathname,
-    referrer: document.referrer,
-    navigationTimestamp: new Date().toISOString(),
-  });
-};
-
-// Add component integration logging
-const logComponentMount = (component: string) => {
-  console.log(`[Globe] ${component} mounted:`, {
-    timestamp: new Date().toISOString(),
-    pathname: window.location.pathname,
-    dependencies: {
-      suppliers: suppliers.length,
-      hasGlobe: typeof Globe3D !== "undefined",
-      hasStats: typeof SupplierStats !== "undefined",
-    },
-  });
-};
 
 export default function GlobePage() {
   const [selectedSupplier, setSelectedSupplier] = useState<
@@ -39,6 +17,27 @@ export default function GlobePage() {
   const [activeViewTab, setActiveViewTab] = useState("globe"); // globe, stats
 
   useEffect(() => {
+    // Logging functions moved inside useEffect
+    const logRouteTransition = () => {
+      console.log("[Globe] Route transition:", {
+        currentPath: window.location.pathname,
+        referrer: document.referrer,
+        navigationTimestamp: new Date().toISOString(),
+      });
+    };
+
+    const logComponentMount = (component: string) => {
+      console.log(`[Globe] ${component} mounted:`, {
+        timestamp: new Date().toISOString(),
+        pathname: window.location.pathname,
+        dependencies: {
+          suppliers: suppliers.length,
+          hasGlobe: typeof Globe3D !== "undefined",
+          hasStats: typeof SupplierStats !== "undefined",
+        },
+      });
+    };
+
     logRouteTransition();
     logComponentMount("GlobePage");
   }, []);
@@ -50,9 +49,6 @@ export default function GlobePage() {
 
   // Summary statistics
   const highRiskSuppliers = suppliers.filter((s) => s.risk > 70).length;
-  const criticalSuppliers = suppliers.filter(
-    (s) => s.status === "Critical"
-  ).length;
   const atRiskSuppliers = suppliers.filter(
     (s) => s.status === "At Risk"
   ).length;

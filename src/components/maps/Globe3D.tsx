@@ -1,8 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
-import Globe from "globe.gl";
-import { Supplier } from "@/lib/data/suppliers/suppliers";
+import { useRef, useEffect, useState, useCallback, memo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -14,14 +12,22 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import * as THREE from "three";
+import dynamic from "next/dynamic";
+import { Supplier } from "@/lib/data/suppliers/suppliers";
+import type { GlobeInstance } from "globe.gl";
+
+interface BaseRegion {
+  lat: number;
+  lng: number;
+  radius: number;
+}
 
 interface Globe3DProps {
   suppliers: Supplier[];
   onSupplierSelect: (supplier: Supplier | null) => void;
   selectedSupplier: Supplier | null;
   isSimulation?: boolean;
-  selectedRegions?: Array<{ lat: number; lng: number; radius: number }>;
+  selectedRegions?: BaseRegion[];
   onRegionClick?: (lat: number, lng: number) => void;
 }
 
@@ -109,429 +115,527 @@ const validateWorldMapCompatibility = (props: Globe3DProps) => {
   });
 };
 
-export default function Globe3D({
-  suppliers,
-  onSupplierSelect,
-  selectedSupplier,
-  isSimulation = false,
-  selectedRegions = [],
-  onRegionClick,
-}: Globe3DProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const globeRef = useRef<any>(null);
-  const performanceRef = useRef({
-    lastFrameTime: Date.now(),
-    frameCount: 0,
-    fps: 0,
-    renderTime: 0,
-  });
-  const [isHoveringSupplier, setIsHoveringSupplier] = useState<Supplier | null>(
-    null
+const addDebugLog = (message: string) => {
+  if (process.env.NODE_ENV === "development") {
+    console.log(message);
+  }
+};
+
+// Memoized Supplier Tooltip component
+const SupplierTooltip = memo(({ supplier }: { supplier: Supplier | null }) => {
+  if (!supplier) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 10 }}
+      className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-900/95 backdrop-blur-sm rounded-lg border border-gray-800 shadow-xl p-3"
+    >
+      <div className="text-center">
+        <p className="text-white font-medium">{supplier.name}</p>
+        <p className="text-sm text-gray-400">{supplier.location.country}</p>
+      </div>
+    </motion.div>
   );
-  const [climateData, setClimateData] = useState<ClimateRiskLayer | null>(null);
-  const [showClimateEvents, setShowClimateEvents] = useState(true);
+});
+SupplierTooltip.displayName = "SupplierTooltip";
 
-  // Optimized debug logging
-  const addDebugLog = (message: string, data?: any) => {
-    if (process.env.NODE_ENV === "development") {
-      console.log(`[Globe3D] ${message}`, data);
-    }
-  };
+// Memoized Supplier Details Panel component
+const SupplierDetailsPanel = memo(
+  ({
+    supplier,
+    onClose,
+  }: {
+    supplier: Supplier | null;
+    onClose: () => void;
+  }) => {
+    if (!supplier) return null;
 
-  useEffect(() => {
-    addDebugLog("Globe3D: Component mounted");
+    return (
+      <motion.div
+        initial={{ opacity: 0, x: 20 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: 20 }}
+        transition={{ duration: 0.2 }}
+        className="absolute top-4 right-4 w-96 bg-gray-900/95 backdrop-blur-sm rounded-lg border border-gray-800 shadow-xl"
+      >
+        <div className="p-4">
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <h3 className="text-xl font-bold text-white">{supplier.name}</h3>
+              <p className="text-gray-400 text-sm flex items-center gap-2">
+                {supplier.location.country}
+                <span>•</span>
+                Tier {supplier.tier}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-gray-400 hover:text-white"
+              onClick={onClose}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
 
-    if (!containerRef.current) return;
+          <div className="space-y-4">
+            {/* Risk Score */}
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm text-gray-400">Risk Score</span>
+                <span
+                  className={`text-sm font-bold ${
+                    supplier.risk > 70
+                      ? "text-red-400"
+                      : supplier.risk > 40
+                      ? "text-yellow-400"
+                      : "text-green-400"
+                  }`}
+                >
+                  {supplier.risk}%
+                </span>
+              </div>
+              <div className="w-full bg-gray-800 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full ${
+                    supplier.risk > 70
+                      ? "bg-red-500"
+                      : supplier.risk > 40
+                      ? "bg-yellow-500"
+                      : "bg-green-500"
+                  }`}
+                  style={{ width: `${supplier.risk}%` }}
+                />
+              </div>
+            </div>
 
-    // Initialize globe with optimized settings
-    const globe = Globe()
-      .globeImageUrl(
-        "//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
-      )
-      .bumpImageUrl("//unpkg.com/three-globe/example/img/earth-topology.png")
-      .backgroundImageUrl("//unpkg.com/three-globe/example/img/night-sky.png")
-      .showGraticules(true)
-      .showAtmosphere(true)
-      .atmosphereColor("#3a228a")
-      .atmosphereAltitude(0.25)
-      .pointsData(suppliers)
-      .pointLat((d) => d.location.coordinates[1])
-      .pointLng((d) => d.location.coordinates[0])
-      .pointColor((d) => {
+            {/* Status */}
+            <div className="flex items-center gap-2">
+              <AlertTriangle
+                className={`h-4 w-4 ${
+                  supplier.status === "Critical"
+                    ? "text-red-400"
+                    : supplier.status === "At Risk"
+                    ? "text-yellow-400"
+                    : "text-green-400"
+                }`}
+              />
+              <span className="text-sm text-gray-400">Status:</span>
+              <Badge
+                variant="outline"
+                className={`${
+                  supplier.status === "Critical"
+                    ? "border-red-500 text-red-400"
+                    : supplier.status === "At Risk"
+                    ? "border-yellow-500 text-yellow-400"
+                    : "border-green-500 text-green-400"
+                }`}
+              >
+                {supplier.status}
+              </Badge>
+            </div>
+
+            {/* Trend */}
+            <div className="flex items-center gap-2">
+              {supplier.trend === "up" ? (
+                <TrendingUp className="h-4 w-4 text-red-400" />
+              ) : supplier.trend === "down" ? (
+                <TrendingDown className="h-4 w-4 text-green-400" />
+              ) : (
+                <Minus className="h-4 w-4 text-gray-400" />
+              )}
+              <span className="text-sm text-gray-400">Trend:</span>
+              <span
+                className={`text-sm ${
+                  supplier.trend === "up"
+                    ? "text-red-400"
+                    : supplier.trend === "down"
+                    ? "text-green-400"
+                    : "text-gray-400"
+                }`}
+              >
+                {supplier.trend === "up"
+                  ? "Increasing Risk"
+                  : supplier.trend === "down"
+                  ? "Decreasing Risk"
+                  : "Stable"}
+              </span>
+            </div>
+
+            {/* Materials */}
+            <div>
+              <h4 className="text-sm text-gray-400 mb-2">Materials</h4>
+              <div className="flex flex-wrap gap-2">
+                {supplier.materials.map((material, index) => (
+                  <Badge
+                    key={index}
+                    variant="secondary"
+                    className="bg-gray-800 text-gray-200"
+                  >
+                    {material}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            {/* Impact */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-400">Impact:</span>
+              <Badge
+                variant="outline"
+                className={`${
+                  supplier.impact === "High"
+                    ? "border-red-500 text-red-400"
+                    : supplier.impact === "Medium"
+                    ? "border-yellow-500 text-yellow-400"
+                    : "border-green-500 text-green-400"
+                }`}
+              >
+                {supplier.impact} Impact
+              </Badge>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+);
+SupplierDetailsPanel.displayName = "SupplierDetailsPanel";
+
+// Create a wrapper component for Globe
+const loadGlobe = async () => {
+  if (typeof window === "undefined") return null;
+  // Using dynamic import instead of require
+  const Globe = (await import("globe.gl")).default;
+  return Globe;
+};
+
+// Dynamically import the wrapper with no SSR
+const GlobeLazy = dynamic(
+  () => loadGlobe() as Promise<typeof import("globe.gl")["default"]>,
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+        <div className="text-gray-400">Loading globe visualization...</div>
+      </div>
+    ),
+  }
+);
+
+const Globe3D = memo(
+  ({
+    suppliers,
+    onSupplierSelect,
+    selectedSupplier,
+    isSimulation = false,
+    selectedRegions = [],
+    onRegionClick,
+  }: Globe3DProps) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const globeRef = useRef<GlobeInstance | null>(null);
+    const performanceRef = useRef({
+      lastFrameTime: Date.now(),
+      frameCount: 0,
+      fps: 0,
+      renderTime: 0,
+    });
+    const timeoutIdRef = useRef<NodeJS.Timeout | null>(null);
+    const lastRunRef = useRef<number>(0);
+
+    const [isClient, setIsClient] = useState(false);
+    const [isHoveringSupplier, setIsHoveringSupplier] =
+      useState<Supplier | null>(null);
+    const [showClimateEvents, setShowClimateEvents] = useState(true);
+
+    const handleSupplierHover = useCallback(
+      (supplier: Supplier | null) => {
+        console.log("handleSupplierHover called with supplier:", supplier?.id);
+        const now = Date.now();
+
+        if (now - lastRunRef.current >= 50) {
+          console.log("Executing immediately due to throttle condition");
+          if (timeoutIdRef.current) {
+            clearTimeout(timeoutIdRef.current);
+          }
+          setIsHoveringSupplier(supplier);
+          lastRunRef.current = now;
+        } else {
+          console.log("Debouncing execution");
+          if (timeoutIdRef.current) {
+            clearTimeout(timeoutIdRef.current);
+          }
+          timeoutIdRef.current = setTimeout(() => {
+            console.log("Executing delayed hover with supplier:", supplier?.id);
+            setIsHoveringSupplier(supplier);
+            lastRunRef.current = Date.now();
+          }, 50);
+        }
+      },
+      [] // Empty dependency array since we're using refs for mutable state
+    );
+
+    const getPointColor = useCallback(
+      (d: Supplier) => {
         if (d === selectedSupplier) return "#ffffff";
         if (d.risk > 70) return "#ff3333";
         if (d.risk > 40) return "#ffaa00";
         return "#33cc33";
-      })
-      .pointAltitude((d) => (d === selectedSupplier ? 0.2 : 0.1))
-      .pointRadius((d) => (d === selectedSupplier ? 0.35 : 0.25))
-      .pointResolution(12)
-      .pointsMerge(false) // Disable point merging to ensure proper selection
-      .pointLabel(
-        (d) => `
-        <div class="bg-gray-900/90 p-2 rounded-lg shadow-lg backdrop-blur-sm border border-gray-700">
-          <div class="font-bold text-white">${d.name}</div>
-          <div class="text-gray-300 text-sm">${d.location.country}</div>
-        </div>
-      `
-      )
-      .onPointClick((point, event) => {
-        event.preventDefault();
-        onSupplierSelect(point);
-      })
-      .onPointHover((point) => {
-        setIsHoveringSupplier(point);
+      },
+      [selectedSupplier]
+    );
+
+    const getPointAltitude = useCallback(
+      (d: Supplier) => {
+        if (d === selectedSupplier) return 0.2;
+        if (d === isHoveringSupplier) return 0.15;
+        return 0.1;
+      },
+      [selectedSupplier, isHoveringSupplier]
+    );
+
+    const getPointRadius = useCallback(
+      (d: Supplier) => {
+        if (d === selectedSupplier) return 0.4;
+        if (d === isHoveringSupplier) return 0.35;
+        return 0.25;
+      },
+      [selectedSupplier, isHoveringSupplier]
+    );
+
+    // Client-side initialization
+    useEffect(() => {
+      setIsClient(true);
+    }, []);
+
+    // Globe initialization effect
+    useEffect(() => {
+      if (!isClient || !containerRef.current) return;
+
+      const initGlobe = async () => {
+        const Globe = await loadGlobe();
+        if (!Globe || !containerRef.current) return;
+
+        // Initialize the globe
+        const globe = Globe()(containerRef.current);
+        globeRef.current = globe;
+
+        // Configure the globe
+        globe
+          .globeImageUrl(
+            "//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
+          )
+          .bumpImageUrl(
+            "//unpkg.com/three-globe/example/img/earth-topology.png"
+          )
+          .backgroundImageUrl(
+            "//unpkg.com/three-globe/example/img/night-sky.png"
+          )
+          .showGraticules(true)
+          .showAtmosphere(true)
+          .atmosphereColor("#3a228a")
+          .atmosphereAltitude(0.25)
+          .pointsData(suppliers)
+          .pointLat((d: Supplier) => d.location.coordinates[1])
+          .pointLng((d: Supplier) => d.location.coordinates[0])
+          .pointColor(getPointColor)
+          .pointAltitude(getPointAltitude)
+          .pointRadius(getPointRadius)
+          .pointResolution(24)
+          .pointsMerge(false)
+          .onPointHover(handleSupplierHover)
+          .onPointClick((obj: Supplier, event: MouseEvent) => {
+            event.preventDefault();
+            onSupplierSelect(obj);
+          })
+          .onGlobeClick((coords: { lat: number; lng: number }) => {
+            if (isSimulation && onRegionClick) {
+              onRegionClick(coords.lat, coords.lng);
+            }
+          });
+
+        // Set initial point of view
+        globe.pointOfView({ lat: 30, lng: 10, altitude: 2.5 });
+      };
+
+      initGlobe();
+
+      return () => {
+        if (globeRef.current) {
+          globeRef.current = null;
+        }
+        // Clean up region circles
         if (containerRef.current) {
-          containerRef.current.style.cursor = point ? "pointer" : "default";
+          const circles =
+            containerRef.current.getElementsByClassName("rounded-full");
+          while (circles.length > 0) {
+            circles[0].remove();
+          }
         }
-      })
-      .onGlobeClick((coords: { lat: number; lng: number }) => {
-        if (isSimulation && onRegionClick) {
-          onRegionClick(coords.lat, coords.lng);
-        }
-      });
-
-    // Add visualization for selected regions in simulation mode
-    if (isSimulation && selectedRegions.length > 0) {
-      const regionGeometries = selectedRegions.map((region) => ({
-        type: "Feature",
-        geometry: {
-          type: "Point",
-          coordinates: [region.lng, region.lat],
-        },
-        properties: {
-          radius: region.radius,
-        },
-      }));
-
-      globe
-        .ringsData(regionGeometries)
-        .ringColor(() => "#ef4444")
-        .ringMaxRadius("radius")
-        .ringPropagationSpeed(1)
-        .ringRepeatPeriod(3000);
-    }
-
-    // Set initial point of view
-    globe.pointOfView({ lat: 30, lng: 10, altitude: 2.5 });
-
-    // Performance monitoring
-    let frameCount = 0;
-    let lastTime = performance.now();
-
-    const animate = () => {
-      const currentTime = performance.now();
-      frameCount++;
-
-      if (currentTime - lastTime >= 1000) {
-        performanceRef.current.fps = Math.round(
-          (frameCount * 1000) / (currentTime - lastTime)
-        );
-        frameCount = 0;
-        lastTime = currentTime;
-      }
-
-      requestAnimationFrame(animate);
-    };
-
-    animate();
-    globe(containerRef.current);
-    globeRef.current = globe;
-
-    // Optimized resize handler
-    const debouncedResize = debounce(() => {
-      if (containerRef.current && globeRef.current) {
-        const { width, height } = containerRef.current.getBoundingClientRect();
-        globeRef.current.width(width);
-        globeRef.current.height(height);
-      }
-    }, 100);
-
-    window.addEventListener("resize", debouncedResize);
-
-    // Add logging for simulation mode
-    if (isSimulation) {
-      addDebugLog("Simulation Mode Active", {
-        selectedRegions,
-        supplierCount: suppliers.length,
-      });
-    }
-
-    return () => {
-      window.removeEventListener("resize", debouncedResize);
-      if (globeRef.current) {
-        globeRef.current = null;
-      }
-    };
-  }, [
-    suppliers,
-    onSupplierSelect,
-    selectedSupplier,
-    isSimulation,
-    selectedRegions,
-    onRegionClick,
-  ]);
-
-  // Add effect to update points when suppliers change
-  useEffect(() => {
-    if (globeRef.current) {
-      globeRef.current.pointsData(suppliers);
-    }
-  }, [suppliers]);
-
-  // Add effect to update camera when supplier is selected
-  useEffect(() => {
-    if (globeRef.current && selectedSupplier) {
-      const lat = selectedSupplier.location.coordinates[1];
-      const lng = selectedSupplier.location.coordinates[0];
-      globeRef.current.pointOfView({ lat, lng, altitude: 2.5 }, 1000);
-    }
-  }, [selectedSupplier]);
-
-  // Debounce helper
-  function debounce(fn: Function, ms: number) {
-    let timer: NodeJS.Timeout;
-    return (...args: any[]) => {
-      clearTimeout(timer);
-      timer = setTimeout(() => fn.apply(this, args), ms);
-    };
-  }
-
-  useEffect(() => {
-    validateWorldMapCompatibility({
+      };
+    }, [
+      isClient,
       suppliers,
-      onSupplierSelect,
       selectedSupplier,
-    });
-  }, [suppliers, onSupplierSelect, selectedSupplier]);
+      isHoveringSupplier,
+      handleSupplierHover,
+      getPointColor,
+      getPointAltitude,
+      getPointRadius,
+      onSupplierSelect,
+      isSimulation,
+      selectedRegions,
+      onRegionClick,
+    ]);
 
-  return (
-    <div className="relative w-full h-full">
-      <div
-        ref={containerRef}
-        className="w-full h-full bg-gray-900 rounded-lg overflow-hidden"
-        style={{ touchAction: "none" }}
-      />
+    // Update points when suppliers change
+    useEffect(() => {
+      if (globeRef.current) {
+        globeRef.current.pointsData(suppliers);
+      }
+    }, [suppliers]);
 
-      {/* Climate Events Control Panel */}
-      <div className="absolute top-4 left-4 bg-gray-900/90 p-4 rounded-lg backdrop-blur-sm border border-gray-800 shadow-xl">
-        <div className="space-y-4">
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={showClimateEvents}
-                onChange={(e) => setShowClimateEvents(e.target.checked)}
-                className="form-checkbox h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
-              />
-              <span className="text-white text-sm font-medium">
-                Show Climate Events
-              </span>
-            </label>
+    // Update camera when supplier is selected
+    useEffect(() => {
+      if (globeRef.current && selectedSupplier) {
+        const lat = selectedSupplier.location.coordinates[1];
+        const lng = selectedSupplier.location.coordinates[0];
+        globeRef.current.pointOfView({ lat, lng, altitude: 2.5 }, 1000);
+      }
+    }, [selectedSupplier]);
+
+    // Compatibility validation
+    useEffect(() => {
+      validateWorldMapCompatibility({
+        suppliers,
+        onSupplierSelect,
+        selectedSupplier,
+      });
+    }, [suppliers, onSupplierSelect, selectedSupplier]);
+
+    if (!isClient) {
+      return (
+        <div
+          ref={containerRef}
+          className="w-full h-full bg-gray-900 flex items-center justify-center"
+        >
+          <div className="text-gray-400">Loading globe visualization...</div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="relative w-full h-full">
+        <div
+          ref={containerRef}
+          className="w-full h-full bg-gray-900 rounded-lg overflow-hidden"
+          style={{ touchAction: "none" }}
+        />
+
+        {/* Climate Events Control Panel */}
+        <div className="absolute top-4 left-4 bg-gray-900/90 p-4 rounded-lg backdrop-blur-sm border border-gray-800 shadow-xl">
+          <div className="space-y-4">
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={showClimateEvents}
+                  onChange={(e) => setShowClimateEvents(e.target.checked)}
+                  className="form-checkbox h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
+                />
+                <span className="text-white text-sm font-medium">
+                  Show Climate Events
+                </span>
+              </label>
+            </div>
+
+            {showClimateEvents && (
+              <div className="space-y-2">
+                <div className="flex gap-4 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                    <span className="text-xs text-gray-300">Fire Risk</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-orange-500"></div>
+                    <span className="text-xs text-gray-300">Drought Risk</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
+        </div>
 
-          {showClimateEvents && (
-            <div className="space-y-2">
-              <div className="flex gap-4 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                  <span className="text-xs text-gray-300">Fire Risk</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-orange-500"></div>
-                  <span className="text-xs text-gray-300">Drought Risk</span>
-                </div>
-              </div>
-            </div>
+        {/* Enhanced Debug Panel */}
+        <div className="absolute bottom-4 left-4 max-w-md max-h-48 overflow-auto bg-gray-900/90 text-white p-4 rounded-lg text-xs">
+          <h3 className="font-bold mb-2">Visualization Debug:</h3>
+          <div className="space-y-1">
+            <div>FPS: {Math.round(performanceRef.current.fps)}</div>
+            <div>Climate Layer: {showClimateEvents ? "Visible" : "Hidden"}</div>
+            <div className="h-px bg-gray-700 my-2" />
+            {/* Add any other relevant debug information here */}
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {selectedSupplier && (
+            <SupplierDetailsPanel
+              supplier={selectedSupplier}
+              onClose={() => onSupplierSelect(null)}
+            />
           )}
-        </div>
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {isHoveringSupplier && !selectedSupplier && (
+            <SupplierTooltip supplier={isHoveringSupplier} />
+          )}
+        </AnimatePresence>
       </div>
+    );
+  }
+);
 
-      {/* Enhanced Debug Panel */}
-      <div className="absolute bottom-4 left-4 max-w-md max-h-48 overflow-auto bg-gray-900/90 text-white p-4 rounded-lg text-xs">
-        <h3 className="font-bold mb-2">Visualization Debug:</h3>
-        <div className="space-y-1">
-          <div>FPS: {Math.round(performanceRef.current.fps)}</div>
-          <div>Climate Layer: {showClimateEvents ? "Visible" : "Hidden"}</div>
-          <div className="h-px bg-gray-700 my-2" />
-          {/* Add any other relevant debug information here */}
-        </div>
-      </div>
+Globe3D.displayName = "Globe3D";
 
-      {/* Supplier Details Panel */}
-      <AnimatePresence>
-        {selectedSupplier && (
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 20 }}
-            transition={{ duration: 0.2 }}
-            className="absolute top-4 right-4 w-96 bg-gray-900/95 backdrop-blur-sm rounded-lg border border-gray-800 shadow-xl"
-          >
-            <div className="p-4">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-xl font-bold text-white">
-                    {selectedSupplier.name}
-                  </h3>
-                  <p className="text-gray-400 text-sm flex items-center gap-2">
-                    {selectedSupplier.location.country}
-                    <span>•</span>
-                    Tier {selectedSupplier.tier}
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-gray-400 hover:text-white"
-                  onClick={() => onSupplierSelect(null)}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-
-              <div className="space-y-4">
-                {/* Risk Score */}
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-sm text-gray-400">Risk Score</span>
-                    <span
-                      className={`text-sm font-bold ${
-                        selectedSupplier.risk > 70
-                          ? "text-red-400"
-                          : selectedSupplier.risk > 40
-                          ? "text-yellow-400"
-                          : "text-green-400"
-                      }`}
-                    >
-                      {selectedSupplier.risk}%
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-800 rounded-full h-2">
-                    <div
-                      className={`h-2 rounded-full ${
-                        selectedSupplier.risk > 70
-                          ? "bg-red-500"
-                          : selectedSupplier.risk > 40
-                          ? "bg-yellow-500"
-                          : "bg-green-500"
-                      }`}
-                      style={{ width: `${selectedSupplier.risk}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Status */}
-                <div className="flex items-center gap-2">
-                  <AlertTriangle
-                    className={`h-4 w-4 ${
-                      selectedSupplier.status === "Critical"
-                        ? "text-red-400"
-                        : selectedSupplier.status === "At Risk"
-                        ? "text-yellow-400"
-                        : "text-green-400"
-                    }`}
-                  />
-                  <span className="text-sm text-gray-400">Status:</span>
-                  <Badge
-                    variant="outline"
-                    className={`${
-                      selectedSupplier.status === "Critical"
-                        ? "border-red-500 text-red-400"
-                        : selectedSupplier.status === "At Risk"
-                        ? "border-yellow-500 text-yellow-400"
-                        : "border-green-500 text-green-400"
-                    }`}
-                  >
-                    {selectedSupplier.status}
-                  </Badge>
-                </div>
-
-                {/* Trend */}
-                <div className="flex items-center gap-2">
-                  {selectedSupplier.trend === "up" ? (
-                    <TrendingUp className="h-4 w-4 text-red-400" />
-                  ) : selectedSupplier.trend === "down" ? (
-                    <TrendingDown className="h-4 w-4 text-green-400" />
-                  ) : (
-                    <Minus className="h-4 w-4 text-gray-400" />
-                  )}
-                  <span className="text-sm text-gray-400">Trend:</span>
-                  <span
-                    className={`text-sm ${
-                      selectedSupplier.trend === "up"
-                        ? "text-red-400"
-                        : selectedSupplier.trend === "down"
-                        ? "text-green-400"
-                        : "text-gray-400"
-                    }`}
-                  >
-                    {selectedSupplier.trend === "up"
-                      ? "Increasing Risk"
-                      : selectedSupplier.trend === "down"
-                      ? "Decreasing Risk"
-                      : "Stable"}
-                  </span>
-                </div>
-
-                {/* Materials */}
-                <div>
-                  <h4 className="text-sm text-gray-400 mb-2">Materials</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedSupplier.materials.map((material, index) => (
-                      <Badge
-                        key={index}
-                        variant="secondary"
-                        className="bg-gray-800 text-gray-200"
-                      >
-                        {material}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Impact */}
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-400">Impact:</span>
-                  <Badge
-                    variant="outline"
-                    className={`${
-                      selectedSupplier.impact === "High"
-                        ? "border-red-500 text-red-400"
-                        : selectedSupplier.impact === "Medium"
-                        ? "border-yellow-500 text-yellow-400"
-                        : "border-green-500 text-green-400"
-                    }`}
-                  >
-                    {selectedSupplier.impact} Impact
-                  </Badge>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Quick Info Tooltip */}
-      <AnimatePresence>
-        {isHoveringSupplier && !selectedSupplier && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-900/95 backdrop-blur-sm rounded-lg border border-gray-800 shadow-xl p-3"
-          >
-            <div className="text-center">
-              <p className="text-white font-medium">
-                {isHoveringSupplier.name}
-              </p>
-              <p className="text-sm text-gray-400">
-                {isHoveringSupplier.location.country}
-              </p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
+// Debounce helper
+function debounce<T extends (...args: any[]) => void>(fn: T, ms: number): T {
+  let timeoutId: NodeJS.Timeout;
+  return ((...args: Parameters<T>) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), ms);
+  }) as T;
 }
+
+// Throttle and debounce helper
+function throttleAndDebounce<T extends (...args: any[]) => void>(
+  fn: T,
+  delay: number
+): T {
+  let timeoutId: NodeJS.Timeout | null = null;
+  let lastRun = 0;
+
+  return ((...args: Parameters<T>) => {
+    const now = Date.now();
+
+    if (now - lastRun >= delay) {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      fn(...args);
+      lastRun = now;
+    } else {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      timeoutId = setTimeout(() => {
+        fn(...args);
+        lastRun = Date.now();
+      }, delay);
+    }
+  }) as T;
+}
+
+export default Globe3D;
